@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Forma en bici</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  :root {
+    --color-fg: #1f2328; --color-fg-muted: #5f6670; --color-bg: #f7f6f3; --color-panel: #ffffff;
+    --color-border-line: #e3e1dc; --color-ok: #2f9e64; --color-warn: #d49a1c; --color-bad: #d2503f;
+    --series-0: #2f6fd1; --series-1: #e07b39;
+    --font-anthropic-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-anthropic-serif: "Source Serif 4", Georgia, serif;
+    --cds-font-size-caption: 12.5px; --cds-font-size-body: 15px; --cds-font-size-heading: 19px; --cds-font-size-title: 34px;
+    --cds-font-weight-medium: 600;
+    --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 14px; --cds-gap-lg: 20px; --cds-gap-xl: 36px;
+    --cds-pad-xs: 4px; --cds-pad-sm: 8px; --cds-pad-md: 12px; --cds-pad-lg: 16px; --cds-pad-xl: 24px;
+    --cds-radius: 10px;
+    --cds-chart-muted: #b8bcc3; --cds-chart-grid: #ebe9e4; --cds-chart-axis: #cfccc5; --cds-chart-reference: #8a8f97;
+    --cds-text-secondary: #6a7079; --cds-surface-popover: #ffffff; --cds-border: #dedbd5;
+    --cds-shadow-popover: 0 6px 20px rgba(0,0,0,.12);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-fg: #ecebe8; --color-fg-muted: #a3a29e; --color-bg: #161616; --color-panel: #1f1f1f;
+      --color-border-line: #333230; --color-ok: #4cc485; --color-warn: #e8b440; --color-bad: #ef6b5a;
+      --series-0: #5c95ef; --series-1: #f09a5c;
+      --cds-chart-muted: #5d5f63; --cds-chart-grid: #2b2b2a; --cds-chart-axis: #444; --cds-chart-reference: #8d9096;
+      --cds-text-secondary: #a3a29e; --cds-surface-popover: #262626; --cds-border: #3a3a38;
+      --cds-shadow-popover: 0 6px 20px rgba(0,0,0,.5);
+      color-scheme: dark;
+    }
+  }
+  html, body { margin: 0; background: var(--color-bg); color: var(--color-fg); font-family: var(--font-anthropic-sans); font-size: 15px; }
+  #dash-root { max-width: 1180px; margin: 0 auto; padding-block: 28px 48px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .gh-volver { display: inline-block; margin-bottom: 14px; color: var(--color-fg-muted); text-decoration: none; font-size: 13px; }
+  .gh-volver:hover { color: var(--color-fg); }
+  .dash-skeleton { color: transparent !important; background: var(--cds-chart-grid); border-radius: 6px; min-width: 3ch; display: inline-block; }
+  .dash-select { appearance: none; font: inherit; font-size: 14px; color: var(--color-fg); background-color: var(--color-panel);
+    border: 1px solid var(--color-border-line); border-radius: 8px; padding: 6px 30px 6px 10px; max-width: 100%;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center; }
+  .gh-pie { margin-top: 32px; font-size: 12px; color: var(--color-fg-muted); }
+</style>
+<script>
+  // Adaptador: da a la página la misma interfaz «dash» que tiene en Claude, leyendo los JSON de datos/.
+  window.dash = (function () {
+    const IDS = ['resumen', 'diario', 'semanas', 'actividades', 'detalle', 'potencia', 'consejos'];
+    const store = {}, draws = {};
+    IDS.forEach((id) => { store[id] = { status: 'loading', data: [], meta: null }; });
+    function run(name) {
+      const fn = draws[name];
+      if (!fn) return;
+      document.querySelectorAll('[data-draw="' + name + '"]').forEach((el) => {
+        try { fn(el); } catch (e) { console.error('dibujo ' + name, e); }
+      });
+    }
+    function runAll() { Object.keys(draws).forEach(run); }
+    let t = null;
+    window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(runAll, 150); });
+    return {
+      colors: ['var(--series-0)', 'var(--series-1)', 'var(--cds-chart-muted)'],
+      data: (id) => store[id] || { status: 'missing', data: [] },
+      draw: (name, fn) => { if (fn) { draws[name] = fn; } else { run(name); } },
+      onData: () => {}, params: () => ({}), setParams: () => {}, resetParams: () => {}, setLink: () => {}, refresh: () => {},
+      _start: () => {
+        runAll();
+        IDS.forEach((id) => {
+          fetch('datos/' + id + '.json?v=' + Date.now())
+            .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+            .then((j) => { store[id] = { status: 'ok', data: j.rows || j, meta: j.meta || null }; runAll(); })
+            .catch(() => { store[id] = { status: 'error', data: [] }; runAll(); });
+        });
+      }
+    };
+  })();
+</script>
+</head>
+<body>
+<div id="dash-root">
+<a class="gh-volver" href="../">← Mis herramientas</a>
+<meta name="dash-one-writer">
+<style>
+  /* Layout: cabecera con la frase de hoy, franja de 5 indicadores, luego gráficas a todo el ancho y consejos */
+  .fb { --fb-up: var(--color-ok); --fb-down: var(--color-bad); --fb-flat: var(--color-fg-muted);
+        display: flex; flex-direction: column; gap: var(--cds-gap-xl); font-family: var(--font-anthropic-sans); color: var(--color-fg); }
+  .fb-head { display: flex; flex-direction: column; gap: var(--cds-gap-sm); max-width: 62rem; }
+  .fb-title { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0; text-wrap: balance; }
+  .fb-lede { font-size: var(--cds-font-size-heading); line-height: 1.4; margin: 0; max-width: 44rem; text-wrap: pretty; }
+  .fb-sub { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); margin: 0; }
+  .fb-status { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); gap: var(--cds-gap-md); }
+  .fb-card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius);
+             padding: var(--cds-pad-lg); display: flex; flex-direction: column; gap: var(--cds-gap-xs); min-width: 0; }
+  .fb-label { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); letter-spacing: .04em; text-transform: uppercase; }
+  .fb-big { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: 2rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .fb-unit { font-size: 1rem; color: var(--color-fg-muted); margin-left: .15em; }
+  .fb-note { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+  .fb-note b { color: var(--color-fg); font-weight: var(--cds-font-weight-medium); }
+  .fb-pill { display: inline-flex; align-items: center; gap: .4em; align-self: flex-start; font-size: 1.05rem;
+             font-weight: var(--cds-font-weight-medium); padding: .2em .7em; border-radius: 999px;
+             background: color-mix(in srgb, var(--fb-flat) 14%, transparent); color: var(--color-fg); }
+  .fb-pill::before { content: ""; width: .55em; height: .55em; border-radius: 50%; background: var(--fb-flat); }
+  .fb-pill.is-up { background: color-mix(in srgb, var(--fb-up) 16%, transparent); }
+  .fb-pill.is-up::before { background: var(--fb-up); }
+  .fb-pill.is-down { background: color-mix(in srgb, var(--fb-down) 16%, transparent); }
+  .fb-pill.is-down::before { background: var(--fb-down); }
+  .fb-pill.is-warn::before { background: var(--color-warn); }
+  .fb-pill.is-warn { background: color-mix(in srgb, var(--color-warn) 16%, transparent); }
+  .fb-sec { display: flex; flex-direction: column; gap: var(--cds-gap-sm); min-width: 0; }
+  .fb-sec h2 { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0; }
+  .fb-sec > p { margin: 0; color: var(--color-fg-muted); max-width: 46rem; line-height: 1.5; }
+  .fb-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--cds-gap-sm); }
+  .fb-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .fb-legend span { display: inline-flex; align-items: center; gap: .4em; }
+  .fb-sw { width: .9em; height: .25em; border-radius: 2px; background: var(--cds-chart-muted); display: inline-block; }
+  .fb-sw.is-dot { width: .6em; height: .6em; border-radius: 50%; }
+  .fb-chart { position: relative; min-height: 260px; width: 100%; }
+  .fb-chart svg { display: block; overflow: visible; }
+  .fb-chart .tick text, .fb-chart .fb-axis-label { fill: var(--cds-text-secondary); font-size: var(--cds-font-size-caption); font-family: var(--font-anthropic-sans); }
+  .fb-chart .tick line { stroke: var(--cds-chart-grid); }
+  .fb-chart .domain { stroke: var(--cds-chart-axis); }
+  .fb-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border);
+            box-shadow: var(--cds-shadow-popover); border-radius: var(--cds-radius); padding: var(--cds-pad-sm) var(--cds-pad-md);
+            font-size: var(--cds-font-size-caption); line-height: 1.5; min-width: 9rem; font-variant-numeric: tabular-nums; z-index: 2; }
+  .fb-tip b { font-weight: var(--cds-font-weight-medium); }
+  .fb-tip .fb-tip-h { color: var(--cds-text-secondary); margin-bottom: .2em; }
+  .fb-msg { color: var(--color-fg-muted); padding: var(--cds-pad-lg) 0; }
+  .fb-tips { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--cds-gap-md); }
+  .fb-tipcard { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius);
+                padding: var(--cds-pad-lg); display: flex; flex-direction: column; gap: var(--cds-gap-xs); min-width: 0; }
+  .fb-tipcard h3 { margin: 0; font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); text-wrap: balance; }
+  .fb-tipcard p { margin: 0; line-height: 1.5; }
+  .fb-tag { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); letter-spacing: .04em; text-transform: uppercase; }
+  .fb-tipcard.is-aviso .fb-tag { color: var(--color-warn); }
+  .fb-tablewrap { overflow-x: auto; }
+  .fb-table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-body); font-variant-numeric: tabular-nums; }
+  .fb-table th { text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); font-size: var(--cds-font-size-caption);
+                 padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+  .fb-table td { padding: var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+  .fb-table .n { text-align: right; }
+  .fb-table td.fb-name { white-space: normal; min-width: 12rem; }
+  .fb-foot { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .fb-foot summary { cursor: pointer; }
+  .fb-foot dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--cds-gap-xs) var(--cds-gap-md); margin: var(--cds-gap-sm) 0 0; }
+  .fb-foot dt { font-weight: var(--cds-font-weight-medium); color: var(--color-fg); }
+  .fb-foot dd { margin: 0; }
+  @media (max-width: 30rem) { .fb-foot dl { grid-template-columns: 1fr; } .fb-big { font-size: 1.7rem; } }
+  .fb { --fb-z1: #94a0ad; --fb-z2: #4a8bd6; --fb-z3: #33a468; --fb-z4: #dcae2f; --fb-z5: #e8873a; --fb-z6: #de5745; --fb-z7: #9b51c9; }
+  .fb-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: var(--cds-gap-md); }
+  .fb-tile { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius);
+             padding: var(--cds-pad-lg); display: flex; flex-direction: column; gap: var(--cds-gap-sm); min-width: 0; }
+  .fb-tile .fb-big { font-size: 2.6rem; }
+  .fb-tile-top { display: flex; justify-content: space-between; align-items: center; gap: var(--cds-gap-sm); flex-wrap: wrap; }
+  .fb-fase-row { display: flex; align-items: center; gap: var(--cds-gap-md); }
+  .fb-fase-txt { display: flex; flex-direction: column; gap: 2px; }
+  .fb-arrow { width: 64px; height: 64px; flex: none; }
+  .fb-spark, .fb-gauge, .fb-ftpbars, .fb-minibars { width: 100%; min-height: 56px; margin-top: auto; }
+  .fb-spark svg, .fb-gauge svg, .fb-ftpbars svg, .fb-minibars svg, .fb-arrow svg { display: block; overflow: visible; }
+  .fb-mini-label { fill: var(--cds-text-secondary); font-size: 11px; font-family: var(--font-anthropic-sans); }
+  .fb-dethead { display: flex; flex-direction: column; gap: var(--cds-gap-sm); }
+  .fb-dethead h3 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
+  .fb-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: var(--cds-gap-sm); }
+  .fb-stat { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius);
+             padding: var(--cds-pad-sm) var(--cds-pad-md); display: flex; flex-direction: column; min-width: 0; }
+  .fb-stat b { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+  .fb-stat span { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .fb-chart-det { min-height: 280px; }
+  .fb-detgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: var(--cds-gap-md); }
+  .fb-detbox { display: flex; flex-direction: column; gap: var(--cds-gap-sm); min-width: 0; }
+  .fb-detbox h3 { margin: 0; font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+  .fb-zonas { display: flex; flex-direction: column; gap: 6px; }
+  .fb-zona { display: grid; grid-template-columns: 7.5rem 1fr 4.5rem; align-items: center; gap: var(--cds-gap-sm); font-size: var(--cds-font-size-caption); }
+  .fb-zona .nom { color: var(--color-fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fb-zona .nom b { color: var(--color-fg); font-weight: var(--cds-font-weight-medium); }
+  .fb-zona .bar { height: 12px; border-radius: 3px; background: var(--cds-chart-grid); overflow: hidden; }
+  .fb-zona .bar i { display: block; height: 100%; border-radius: 3px; }
+  .fb-zona .val { text-align: right; font-variant-numeric: tabular-nums; }
+  .fb-chips { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs); }
+  .fb-chip { border: 1px solid var(--color-border-line); border-radius: 999px; padding: .25em .75em; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; display: inline-flex; gap: .4em; align-items: center; }
+  .fb-chip i { width: .6em; height: .6em; border-radius: 50%; display: inline-block; }
+  .fb-table tbody tr { cursor: pointer; }
+  .fb-table tbody tr:hover td { background: color-mix(in srgb, var(--color-fg) 4%, transparent); }
+  .fb-table tbody tr:focus-visible { outline: 2px solid var(--cds-chart-reference); outline-offset: -2px; }
+  .fb-table tbody tr.is-sel td { background: color-mix(in srgb, var(--color-ok) 10%, transparent); }
+  .fb-table td.go { color: var(--color-fg-muted); text-align: right; }
+</style>
+
+<div class="fb">
+  <header class="fb-head" id="cabecera">
+    <h1 class="fb-title">Forma en bici</h1>
+    <p class="fb-lede" data-read lang="es"><span class="dash-skeleton" data-draw="titular" data-source="consejos" data-field="texto" data-where="orden=0">—</span></p>
+    <p class="fb-sub">Entrenos de MyWhoosh a través de intervals.icu · datos del <span data-draw="fecha" data-source="resumen" data-field="fecha" data-row="0">—</span> · <span data-draw="ntotal" data-source="resumen" data-field="entrenos_total" data-row="0">—</span> entrenos desde el <span data-draw="primero" data-source="resumen" data-field="primer_entreno" data-row="0">—</span></p>
+  </header>
+
+  <section class="fb-hero" id="estado" aria-label="Estado de hoy">
+    <div class="fb-tile" id="tarjeta-fase">
+      <div class="fb-tile-top"><span class="fb-label">Fase</span><span class="fb-pill dash-skeleton" data-draw="fase" data-source="resumen" data-field="fase" data-row="0">—</span></div>
+      <div class="fb-fase-row">
+        <div class="fb-arrow" data-draw="flecha" data-source="resumen"></div>
+        <div class="fb-fase-txt">
+          <div class="fb-big"><span class="dash-skeleton" data-draw="fitness" data-source="resumen" data-field="fitness" data-row="0">—</span></div>
+          <span class="fb-note">fitness · <b data-draw="rampa" data-source="resumen" data-field="rampa_semanal" data-row="0">—</b> por semana</span>
+        </div>
+      </div>
+      <div class="fb-spark" data-draw="spark" data-source="diario"></div>
+      <span class="fb-note">Últimos 90 días · tu pico fue <b data-draw="pico" data-source="resumen" data-field="pico_fitness" data-row="0">—</b> el <span data-draw="fpico" data-source="resumen" data-field="fecha_pico" data-row="0">—</span></span>
+    </div>
+    <div class="fb-tile" id="tarjeta-estado">
+      <div class="fb-tile-top"><span class="fb-label">Cómo estás hoy</span><span class="fb-pill dash-skeleton" data-draw="estado" data-source="resumen" data-field="estado" data-row="0">—</span></div>
+      <div class="fb-big"><span class="dash-skeleton" data-draw="forma" data-source="resumen" data-field="forma" data-row="0">—</span></div>
+      <span class="fb-note">forma = fitness − fatiga (<b data-draw="fatiga" data-source="resumen" data-field="fatiga" data-row="0">—</b>)</span>
+      <div class="fb-gauge" data-draw="gauge" data-source="resumen"></div>
+    </div>
+    <div class="fb-tile" id="tarjeta-ftp">
+      <span class="fb-label">FTP estimado</span>
+      <div class="fb-big"><span class="dash-skeleton" data-draw="eftp" data-source="resumen" data-field="eftp" data-row="0">—</span><span class="fb-unit">W</span></div>
+      <span class="fb-note"><b data-draw="wkg" data-source="resumen" data-field="wkg_eftp" data-row="0">—</b> W/kg · perfil <b data-draw="ftpp" data-source="resumen" data-field="ftp_perfil" data-row="0">—</b> W</span>
+      <div class="fb-ftpbars" data-draw="ftpbars" data-source="resumen"></div>
+    </div>
+    <div class="fb-tile" id="tarjeta-volumen">
+      <span class="fb-label">Últimas 4 semanas</span>
+      <div class="fb-big"><span class="dash-skeleton" data-draw="horas" data-source="resumen" data-field="horas_4sem" data-row="0">—</span><span class="fb-unit">h</span></div>
+      <span class="fb-note"><b data-draw="ses4" data-source="resumen" data-field="sesiones_4sem" data-row="0">—</b> sesiones · <b data-draw="tss4" data-source="resumen" data-field="tss_4sem" data-row="0">—</b> TSS</span>
+      <div class="fb-minibars" data-draw="minisem" data-source="semanas"></div>
+    </div>
+  </section>
+
+  <section class="fb-sec" id="curva-forma">
+    <div class="fb-bar">
+      <h2>Fitness, fatiga y forma</h2>
+      <select class="dash-select" id="rango" aria-label="Periodo de la gráfica">
+        <option value="90">Últimos 90 días</option>
+        <option value="182" selected>Últimos 6 meses</option>
+        <option value="366">Último año</option>
+      </select>
+    </div>
+    <p>El fitness sube cuando entrenas de forma constante y baja cuando paras. La forma es fitness menos fatiga: negativa mientras cargas, positiva cuando descansas.</p>
+    <div class="fb-legend">
+      <span><i class="fb-sw" data-sw="0"></i>Fitness (CTL)</span>
+      <span><i class="fb-sw" data-sw="1"></i>Fatiga (ATL)</span>
+      <span><i class="fb-sw fb-sw-ok"></i>Forma positiva</span>
+      <span><i class="fb-sw fb-sw-bad"></i>Forma negativa</span>
+    </div>
+    <div class="fb-chart" data-draw="cforma" data-source="diario"></div>
+  </section>
+
+  <section class="fb-sec" id="carga-semanal">
+    <h2>Carga por semana</h2>
+    <p>TSS de cada semana en las últimas 26. Pasa el dedo o el ratón por una barra para ver horas y sesiones.</p>
+    <div class="fb-chart" data-draw="csem" data-source="semanas"></div>
+  </section>
+
+  <section class="fb-sec" id="curva-potencia">
+    <h2>Tu mejor potencia</h2>
+    <p>Mejores vatios sostenidos en cada duración. Compara los últimos 90 días con los 90 anteriores y con todo el último año.</p>
+    <div class="fb-legend">
+      <span><i class="fb-sw is-dot" data-sw="0"></i>Últimos 90 días</span>
+      <span><i class="fb-sw is-dot" data-sw="1"></i>90 días anteriores</span>
+      <span><i class="fb-sw is-dot"></i>Último año</span>
+    </div>
+    <div class="fb-chart" data-draw="cpot" data-source="potencia"></div>
+  </section>
+
+  <section class="fb-sec" id="consejos">
+    <h2>Qué hacer ahora</h2>
+    <p>Lectura de Claude sobre tus datos de hoy. Se renueva con cada actualización.</p>
+    <div class="fb-tips" data-draw="tips" data-source="consejos"></div>
+  </section>
+
+  <section class="fb-sec" id="detalle">
+    <div class="fb-bar">
+      <h2>Detalle del entreno</h2>
+      <select class="dash-select" id="selent" data-draw="selent" data-source="actividades" aria-label="Elegir entreno"></select>
+    </div>
+    <div class="fb-dethead" data-draw="dethead" data-source="actividades"></div>
+    <div class="fb-legend" id="leyenda-zonas">
+      <span><i class="fb-sw is-dot" style="background:var(--fb-z1)"></i>Z1 Recuperación</span>
+      <span><i class="fb-sw is-dot" style="background:var(--fb-z2)"></i>Z2 Resistencia</span>
+      <span><i class="fb-sw is-dot" style="background:var(--fb-z3)"></i>Z3 Tempo</span>
+      <span><i class="fb-sw is-dot" style="background:var(--fb-z4)"></i>Z4 Umbral</span>
+      <span><i class="fb-sw is-dot" style="background:var(--fb-z5)"></i>Z5 VO2máx</span>
+      <span><i class="fb-sw is-dot" style="background:var(--fb-z6)"></i>Z6 Anaeróbico</span>
+      <span><i class="fb-sw is-dot" style="background:var(--fb-z7)"></i>Z7 Sprint</span>
+    </div>
+    <div class="fb-chart fb-chart-det" data-draw="detpot" data-source="detalle actividades"></div>
+    <div class="fb-detgrid">
+      <div class="fb-detbox" id="detalle-zonas">
+        <h3>Tiempo en cada zona</h3>
+        <div class="fb-zonas" data-draw="detzonas" data-source="actividades"></div>
+      </div>
+      <div class="fb-detbox" id="detalle-intervalos">
+        <h3>Esfuerzos detectados</h3>
+        <div class="fb-chips" data-draw="detint" data-source="actividades"></div>
+      </div>
+    </div>
+  </section>
+
+
+<section class="fb-sec" id="entrenos">
+    <h2>Últimos entrenos</h2>
+    <p>Toca un entreno para ver su detalle arriba.</p>
+    <div class="fb-tablewrap">
+      <table class="fb-table" data-source="actividades" data-row-key="id">
+        <thead><tr>
+          <th data-field="fecha">Fecha</th>
+          <th data-field="nombre">Entreno</th>
+          <th class="n" data-field="minutos">Min</th>
+          <th class="n" data-field="tss">TSS</th>
+          <th class="n" data-field="vatios">W media</th>
+          <th class="n" data-field="np">NP</th>
+          <th class="n" data-field="intensidad">IF</th>
+          <th aria-label="Ver detalle"></th>
+        </tr></thead>
+        <tbody data-draw="tabla"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <details class="fb-foot" id="glosario">
+    <summary>Qué significa cada número</summary>
+    <dl>
+      <dt>TSS</dt><dd>Carga de un entreno: 100 equivale a una hora a tu FTP.</dd>
+      <dt>Fitness (CTL)</dt><dd>Media de tu carga diaria de las últimas 6 semanas. Es tu forma de fondo.</dd>
+      <dt>Fatiga (ATL)</dt><dd>Media de la última semana. Sube rápido cuando aprietas.</dd>
+      <dt>Forma (TSB)</dt><dd>Fitness menos fatiga. Entre −10 y −25 estás construyendo; por encima de +5 estás fresco para rendir.</dd>
+      <dt>Fase</dt><dd>Ascendente si el fitness sube al menos 1 punto por semana de media en 4 semanas, descendente si baja 1 o más, estable entre medias.</dd>
+      <dt>FTP estimado</dt><dd>Potencia que intervals.icu calcula que aguantarías una hora, a partir de tus mejores esfuerzos.</dd>
+      <dt>NP e IF</dt><dd>Potencia normalizada (pesa más los picos) e intensidad: NP dividido por tu FTP.</dd>
+    </dl>
+  </details>
+</div>
+
+<script>
+  (function () {
+    const loc = d3.formatLocale({ decimal: ',', thousands: '.', grouping: [3], currency: ['', ' €'] });
+    const tloc = d3.timeFormatLocale({
+      dateTime: '%A, %e de %B de %Y, %X', date: '%d/%m/%Y', time: '%H:%M:%S', periods: ['AM', 'PM'],
+      days: ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'],
+      shortDays: ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'],
+      months: ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
+      shortMonths: ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+    });
+    const parse = d3.utcParse('%Y-%m-%d');
+    const f1 = loc.format(',.1f'), f0 = loc.format(',.0f'), f2 = loc.format(',.2f'), fs1 = loc.format('+,.1f');
+    window.FB = {
+      rango: 182,
+      parse,
+      n1: (v) => (v == null || isNaN(v) ? '—' : f1(+v)),
+      n0: (v) => (v == null || isNaN(v) ? '—' : f0(+v)),
+      n2: (v) => (v == null || isNaN(v) ? '—' : f2(+v)),
+      s1: (v) => (v == null || isNaN(v) ? '—' : fs1(+v)),
+      dia: (s) => (s ? tloc.utcFormat('%e %b %Y')(parse(s)).trim() : '—'),
+      diaCorto: (s) => (s ? tloc.utcFormat('%e %b')(parse(s)).trim() : '—'),
+      mes: tloc.utcFormat('%b'),
+      mesAnio: tloc.utcFormat('%b %y'),
+      fila: (id) => { const d = dash.data(id); return d.status === 'ok' && d.data.length ? d.data[0] : null; },
+      estado: (id) => dash.data(id).status,
+      ancho: (svg, textos) => {
+        let w = 0;
+        textos.forEach((t) => {
+          const n = svg.append('text').attr('class', 'fb-axis-label').text(t);
+          w = Math.max(w, n.node().getComputedTextLength());
+          n.remove();
+        });
+        return w;
+      },
+      tip: (el) => {
+        let t = el.querySelector('.fb-tip');
+        if (!t) { t = document.createElement('div'); t.className = 'fb-tip'; t.hidden = true; el.appendChild(t); }
+        return t;
+      },
+      ponerTip: (el, t, x, y) => {
+        const w = t.offsetWidth, h = t.offsetHeight, W = el.clientWidth;
+        let left = x + 12; if (left + w > W) left = Math.max(0, x - w - 12);
+        t.style.left = left + 'px'; t.style.top = Math.max(0, y - h - 8) + 'px';
+      },
+      linea: (t, etiqueta, valor) => {
+        const p = document.createElement('div');
+        p.append(etiqueta + ' ');
+        const b = document.createElement('b'); b.textContent = valor; p.append(b);
+        t.append(p);
+      },
+      falla: (el, que) => {
+        const s = dash.data(que).status;
+        if (s === 'ok') return false;
+        el.replaceChildren();
+        if (s === 'error' || s === 'missing') {
+          const m = document.createElement('div'); m.className = 'fb-msg';
+          m.textContent = 'No se ha podido cargar esta gráfica.'; el.append(m);
+        }
+        return true;
+      }
+    };
+  })();
+</script>
+
+<script>
+  // Colores de la leyenda (solo estilo, fuera de las gráficas)
+  document.querySelectorAll('[data-sw]').forEach((s) => { s.style.background = dash.colors[+s.getAttribute('data-sw')]; });
+  document.querySelectorAll('.fb-sw-ok').forEach((s) => { s.style.background = 'var(--color-ok)'; });
+  document.querySelectorAll('.fb-sw-bad').forEach((s) => { s.style.background = 'var(--color-bad)'; });
+  document.querySelectorAll('#rango').forEach((sel) => {
+    sel.addEventListener('change', () => { FB.rango = +sel.value; dash.draw('cforma'); });
+  });
+</script>
+
+<script>
+  // Cifras sueltas de la cabecera y las tarjetas
+  const SIMPLES = [
+    ['fecha', 'resumen', 'fecha', FB.dia], ['ntotal', 'resumen', 'entrenos_total', FB.n0],
+    ['primero', 'resumen', 'primer_entreno', FB.dia], ['rampa', 'resumen', 'rampa_semanal', FB.s1],
+    ['forma', 'resumen', 'forma', FB.s1], ['fatiga', 'resumen', 'fatiga', FB.n1],
+    ['fitness', 'resumen', 'fitness', FB.n1], ['fit28', 'resumen', 'fitness_hace_28d', FB.n1],
+    ['pico', 'resumen', 'pico_fitness', FB.n1], ['fpico', 'resumen', 'fecha_pico', FB.dia],
+    ['eftp', 'resumen', 'eftp', FB.n0], ['wkg', 'resumen', 'wkg_eftp', FB.n2],
+    ['ftpp', 'resumen', 'ftp_perfil', FB.n0], ['horas', 'resumen', 'horas_4sem', FB.n1],
+    ['ses4', 'resumen', 'sesiones_4sem', FB.n0], ['tss4', 'resumen', 'tss_4sem', FB.n0]
+  ];
+  SIMPLES.forEach(([nombre, fuente, campo, fmt]) => {
+    dash.draw(nombre, (el) => {
+      const st = FB.estado(fuente);
+      if (st !== 'loading') el.classList.remove('dash-skeleton');
+      const r = FB.fila(fuente);
+      el.textContent = r ? fmt(r[campo]) : '—';
+    });
+  });
+
+  dash.draw('titular', (el) => {
+    const d = dash.data('consejos');
+    if (d.status !== 'loading') el.classList.remove('dash-skeleton');
+    const r = d.status === 'ok' ? d.data.find((x) => +x.orden === 0) : null;
+    el.textContent = r ? r.texto : '—';
+  });
+
+  const PILL = { Ascendente: 'is-up', Descendente: 'is-down', Estable: '', Fresco: 'is-up', Equilibrado: '', Cargado: 'is-warn', 'Muy cargado': 'is-down' };
+  ['fase', 'estado'].forEach((campo) => {
+    dash.draw(campo, (el) => {
+      const st = FB.estado('resumen');
+      el.classList.remove('is-up', 'is-down', 'is-warn');
+      if (st !== 'loading') el.classList.remove('dash-skeleton');
+      const r = FB.fila('resumen');
+      el.textContent = r ? r[campo] : '—';
+      if (r && PILL[r[campo]]) el.classList.add(PILL[r[campo]]);
+    });
+  });
+</script>
+
+<script>
+  // Fitness, fatiga y forma
+  dash.draw('cforma', (el) => {
+    if (FB.falla(el, 'diario')) return;
+    const todos = dash.data('diario').data.map((r) => ({ ...r, t: FB.parse(r.fecha) })).filter((r) => r.t);
+    const filas = todos.slice(-FB.rango);
+    el.replaceChildren();
+    if (!filas.length) return;
+    const W = el.clientWidth || 640, H = Math.round(Math.max(260, Math.min(360, W * 0.48)));
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+      .attr('role', 'img').attr('aria-label', 'Evolución diaria de fitness, fatiga y forma');
+    const yMax = d3.max(filas, (r) => Math.max(r.fitness || 0, r.fatiga || 0)) || 10;
+    const fExt = d3.max(filas, (r) => Math.abs(r.forma || 0)) || 5;
+    const yTop = d3.scaleLinear().domain([0, yMax * 1.1]).nice();
+    const yF = d3.scaleLinear().domain([-fExt, fExt]).nice();
+    const izq = Math.ceil(FB.ancho(svg, yTop.ticks(4).map(FB.n0).concat(yF.ticks(3).map(FB.n0)))) + 10;
+    const m = { l: izq, r: 12, t: 8, b: 26 };
+    const altoTop = (H - m.t - m.b) * 0.64, hueco = 18, altoF = H - m.t - m.b - altoTop - hueco;
+    const x = d3.scaleUtc().domain(d3.extent(filas, (r) => r.t)).range([m.l, W - m.r]);
+    yTop.range([m.t + altoTop, m.t]);
+    yF.range([m.t + altoTop + hueco + altoF, m.t + altoTop + hueco]);
+    svg.append('g').attr('transform', `translate(0,${H - m.b})`)
+      .call(d3.axisBottom(x).ticks(FB.rango > 100 ? d3.utcMonth.every(FB.rango > 200 && W < 600 ? 2 : 1) : d3.utcWeek.every(W < 600 ? 3 : 2))
+        .tickFormat((d) => (FB.rango > 100 ? (FB.rango > 200 ? FB.mesAnio(d) : FB.mes(d)) : FB.diaCorto(d3.utcFormat('%Y-%m-%d')(d)))).tickSizeOuter(0));
+    svg.append('g').attr('transform', `translate(${m.l},0)`)
+      .call(d3.axisLeft(yTop).ticks(4).tickFormat(FB.n0).tickSize(-(W - m.l - m.r))).call((g) => g.select('.domain').remove());
+    svg.append('g').attr('transform', `translate(${m.l},0)`)
+      .call(d3.axisLeft(yF).ticks(3).tickFormat(FB.n0).tickSize(-(W - m.l - m.r))).call((g) => g.select('.domain').remove());
+    svg.append('text').attr('class', 'fb-axis-label').attr('x', m.l + 4).attr('y', m.t + altoTop + hueco + 10).text('Forma');
+    const bw = Math.max(1, (W - m.l - m.r) / filas.length - 0.6);
+    svg.append('g').selectAll('rect').data(filas).join('rect')
+      .attr('x', (r) => x(r.t) - bw / 2).attr('width', bw)
+      .attr('y', (r) => yF(Math.max(0, r.forma || 0))).attr('height', (r) => Math.abs(yF(r.forma || 0) - yF(0)))
+      .style('fill', (r) => ((r.forma || 0) >= 0 ? 'var(--color-ok)' : 'var(--color-bad)')).style('opacity', 0.75);
+    svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', yF(0)).attr('y2', yF(0)).style('stroke', 'var(--cds-chart-reference)');
+    const series = [['fatiga', dash.colors[1], 1.5], ['fitness', dash.colors[0], 2.5]];
+    series.forEach(([k, c, sw]) => {
+      svg.append('path').datum(filas).attr('fill', 'none').style('stroke', c).attr('stroke-width', sw)
+        .attr('d', d3.line().defined((r) => r[k] != null).x((r) => x(r.t)).y((r) => yTop(r[k])));
+    });
+    const ult = filas[filas.length - 1];
+    svg.append('circle').attr('cx', x(ult.t)).attr('cy', yTop(ult.fitness)).attr('r', 4).style('fill', dash.colors[0]);
+    const guia = svg.append('line').attr('y1', m.t).attr('y2', H - m.b).style('stroke', 'var(--cds-chart-reference)').attr('stroke-dasharray', '3,3').attr('visibility', 'hidden');
+    const tip = FB.tip(el);
+    const bis = d3.bisector((r) => r.t).center;
+    svg.append('rect').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b)
+      .style('fill', 'transparent').style('touch-action', 'pan-y')
+      .on('pointermove', (ev) => {
+        const [px] = d3.pointer(ev);
+        const r = filas[bis(filas, x.invert(px))];
+        if (!r) return;
+        guia.attr('x1', x(r.t)).attr('x2', x(r.t)).attr('visibility', 'visible');
+        tip.replaceChildren();
+        const h = document.createElement('div'); h.className = 'fb-tip-h'; h.textContent = FB.dia(r.fecha); tip.append(h);
+        FB.linea(tip, 'Fitness', FB.n1(r.fitness)); FB.linea(tip, 'Fatiga', FB.n1(r.fatiga));
+        FB.linea(tip, 'Forma', FB.s1(r.forma)); FB.linea(tip, 'TSS del día', FB.n0(r.tss));
+        tip.hidden = false;
+        const box = el.getBoundingClientRect();
+        FB.ponerTip(el, tip, (x(r.t) / W) * box.width, (yTop(r.fitness) / H) * box.height);
+      })
+      .on('pointerleave', () => { tip.hidden = true; guia.attr('visibility', 'hidden'); });
+  });
+</script>
+
+<script>
+  // Carga semanal
+  dash.draw('csem', (el) => {
+    if (FB.falla(el, 'semanas')) return;
+    const filas = dash.data('semanas').data.slice(-26).map((r) => ({ ...r, t: FB.parse(r.semana) }));
+    el.replaceChildren();
+    if (!filas.length) return;
+    const W = el.clientWidth || 640, H = Math.round(Math.max(220, Math.min(300, W * 0.4)));
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+      .attr('role', 'img').attr('aria-label', 'TSS por semana en las últimas 26 semanas');
+    const y = d3.scaleLinear().domain([0, (d3.max(filas, (r) => r.tss) || 10) * 1.1]).nice();
+    const m = { l: Math.ceil(FB.ancho(svg, y.ticks(4).map(FB.n0))) + 10, r: 8, t: 8, b: 26 };
+    y.range([H - m.b, m.t]);
+    const x = d3.scaleBand().domain(filas.map((r) => r.semana)).range([m.l, W - m.r]).padding(0.22);
+    const cada = Math.max(1, Math.ceil(filas.length / Math.max(2, Math.floor((W - m.l) / 70))));
+    svg.append('g').attr('transform', `translate(0,${H - m.b})`)
+      .call(d3.axisBottom(x).tickValues(filas.map((r) => r.semana).filter((_, i) => i % cada === 0)).tickFormat((s) => FB.diaCorto(s)).tickSizeOuter(0));
+    svg.append('g').attr('transform', `translate(${m.l},0)`)
+      .call(d3.axisLeft(y).ticks(4).tickFormat(FB.n0).tickSize(-(W - m.l - m.r))).call((g) => g.select('.domain').remove());
+    const media = d3.mean(filas, (r) => r.tss);
+    const tip = FB.tip(el);
+    svg.append('g').selectAll('rect').data(filas).join('rect')
+      .attr('x', (r) => x(r.semana)).attr('width', x.bandwidth())
+      .attr('y', (r) => y(r.tss)).attr('height', (r) => y(0) - y(r.tss)).attr('rx', 2)
+      .style('fill', (r, i) => (i === filas.length - 1 ? dash.colors[1] : dash.colors[0]))
+      .on('pointerenter pointermove', (ev, r) => {
+        tip.replaceChildren();
+        const h = document.createElement('div'); h.className = 'fb-tip-h'; h.textContent = 'Semana del ' + FB.dia(r.semana); tip.append(h);
+        FB.linea(tip, 'TSS', FB.n0(r.tss)); FB.linea(tip, 'Horas', FB.n1(r.horas)); FB.linea(tip, 'Sesiones', FB.n0(r.sesiones));
+        tip.hidden = false;
+        const box = el.getBoundingClientRect();
+        FB.ponerTip(el, tip, ((x(r.semana) + x.bandwidth() / 2) / W) * box.width, (y(r.tss) / H) * box.height);
+      })
+      .on('pointerleave', () => { tip.hidden = true; });
+    if (media) {
+      svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(media)).attr('y2', y(media))
+        .style('stroke', 'var(--cds-chart-reference)').attr('stroke-dasharray', '4,3');
+      svg.append('text').attr('class', 'fb-axis-label').attr('x', W - m.r).attr('y', y(media) - 5).attr('text-anchor', 'end')
+        .text('media ' + FB.n0(media));
+    }
+  });
+</script>
+
+<script>
+  // Curva de potencia: tres puntos por duración
+  dash.draw('cpot', (el) => {
+    if (FB.falla(el, 'potencia')) return;
+    const filas = dash.data('potencia').data;
+    el.replaceChildren();
+    if (!filas.length) return;
+    const W = el.clientWidth || 640, fila = 46, m0 = { t: 6, b: 26 };
+    const H = m0.t + m0.b + fila * filas.length;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+      .attr('role', 'img').attr('aria-label', 'Mejor potencia por duración: últimos 90 días, 90 días anteriores y último año');
+    const claves = [['ultimo_anio', 'var(--cds-chart-muted)', 'Último año'], ['90d_anteriores', dash.colors[1], '90 días anteriores'], ['ultimos_90d', dash.colors[0], 'Últimos 90 días']];
+    const vals = filas.flatMap((r) => claves.map(([k]) => r[k]).filter((v) => v != null));
+    const x = d3.scaleLinear().domain([d3.min(vals) * 0.85, d3.max(vals) * 1.05]).nice();
+    const etiquetas = filas.map((r) => FB.n0(r.ultimos_90d) + ' W · ' + FB.n2(r.wkg_90d) + ' W/kg');
+    const izq = Math.ceil(FB.ancho(svg, filas.map((r) => r.duracion))) + 14;
+    const der = Math.ceil(FB.ancho(svg, etiquetas)) + 14;
+    const m = { l: izq, r: W < 480 ? 10 : der, t: m0.t, b: m0.b };
+    x.range([m.l, W - m.r]);
+    const y = d3.scaleBand().domain(filas.map((r) => r.duracion)).range([m.t, H - m.b]).padding(0.3);
+    svg.append('g').attr('transform', `translate(0,${H - m.b})`)
+      .call(d3.axisBottom(x).ticks(Math.max(3, Math.floor((W - m.l - m.r) / 70))).tickFormat((v) => FB.n0(v) + ' W').tickSize(-(H - m.t - m.b)))
+      .call((g) => g.select('.domain').remove());
+    svg.append('g').attr('transform', `translate(${m.l - 8},0)`).call(d3.axisLeft(y).tickSize(0)).call((g) => g.select('.domain').remove());
+    const tip = FB.tip(el);
+    const g = svg.append('g').selectAll('g').data(filas).join('g').attr('transform', (r) => `translate(0,${y(r.duracion) + y.bandwidth() / 2})`);
+    g.append('line').attr('x1', (r) => x(d3.min(claves, ([k]) => r[k] ?? Infinity))).attr('x2', (r) => x(d3.max(claves, ([k]) => r[k] ?? -Infinity)))
+      .style('stroke', 'var(--cds-chart-grid)').attr('stroke-width', 3);
+    claves.forEach(([k, c], i) => {
+      g.filter((r) => r[k] != null).append('circle').attr('cx', (r) => x(r[k])).attr('r', i === 2 ? 7 : 5.5).style('fill', c)
+        .style('stroke', 'var(--color-bg)').attr('stroke-width', 1.5);
+    });
+    if (W >= 480) {
+      g.append('text').attr('class', 'fb-axis-label').attr('x', W - m.r + 10).attr('dy', '0.35em')
+        .text((r, i) => etiquetas[i]);
+    }
+    g.append('rect').attr('x', m.l).attr('y', -y.bandwidth() / 2).attr('width', W - m.l - m.r).attr('height', y.bandwidth())
+      .style('fill', 'transparent')
+      .on('pointerenter pointermove', (ev, r) => {
+        tip.replaceChildren();
+        const h = document.createElement('div'); h.className = 'fb-tip-h'; h.textContent = 'Mejor potencia en ' + r.duracion; tip.append(h);
+        FB.linea(tip, 'Últimos 90 días', FB.n0(r.ultimos_90d) + ' W (' + FB.n2(r.wkg_90d) + ' W/kg)');
+        FB.linea(tip, '90 días anteriores', FB.n0(r['90d_anteriores']) + ' W');
+        FB.linea(tip, 'Último año', FB.n0(r.ultimo_anio) + ' W');
+        tip.hidden = false;
+        const box = el.getBoundingClientRect();
+        FB.ponerTip(el, tip, (x(r.ultimos_90d) / W) * box.width, ((y(r.duracion)) / H) * box.height);
+      })
+      .on('pointerleave', () => { tip.hidden = true; });
+  });
+</script>
+
+<script>
+  // Consejos
+  const TAG = { fase: 'Tu fase', mejorar: 'Para mejorar', semana: 'Próximos 7 días', aviso: 'Aviso' };
+  dash.draw('tips', (el) => {
+    const d = dash.data('consejos');
+    el.replaceChildren();
+    if (d.status !== 'ok') {
+      if (d.status === 'error' || d.status === 'missing') {
+        const m = document.createElement('div'); m.className = 'fb-msg'; m.textContent = 'No se han podido cargar los consejos.'; el.append(m);
+      }
+      return;
+    }
+    d.data.filter((r) => r.tipo !== 'titular').sort((a, b) => a.orden - b.orden).forEach((r) => {
+      const c = document.createElement('article'); c.className = 'fb-tipcard' + (r.tipo === 'aviso' ? ' is-aviso' : '');
+      const t = document.createElement('span'); t.className = 'fb-tag'; t.textContent = TAG[r.tipo] || r.tipo;
+      const h = document.createElement('h3'); h.textContent = r.titulo;
+      h.setAttribute('data-source', 'consejos'); h.setAttribute('data-field', 'titulo'); h.setAttribute('data-where', 'orden=' + r.orden);
+      const p = document.createElement('p'); p.textContent = r.texto; p.lang = 'es';
+      p.setAttribute('data-source', 'consejos'); p.setAttribute('data-field', 'texto'); p.setAttribute('data-where', 'orden=' + r.orden);
+      c.append(t, h, p); el.append(c);
+    });
+  });
+</script>
+
+<script>
+  // Cabecera visual: flecha de fase, minigráfica de fitness, indicador de forma, barras de FTP y de volumen
+  dash.draw('flecha', (el) => {
+    const r = FB.fila('resumen');
+    el.replaceChildren();
+    if (!r) return;
+    const color = r.fase === 'Ascendente' ? 'var(--color-ok)' : r.fase === 'Descendente' ? 'var(--color-bad)' : 'var(--color-fg-muted)';
+    const ang = -Math.max(-50, Math.min(50, (r.rampa_semanal || 0) * 25));
+    const svg = d3.select(el).append('svg').attr('width', 64).attr('height', 64).attr('viewBox', '0 0 64 64')
+      .attr('role', 'img').attr('aria-label', 'Fase ' + r.fase);
+    svg.append('circle').attr('cx', 32).attr('cy', 32).attr('r', 30).style('fill', color).style('opacity', 0.15);
+    const g = svg.append('g').attr('transform', `translate(32,32) rotate(${ang})`);
+    g.append('line').attr('x1', -15).attr('x2', 13).attr('y1', 0).attr('y2', 0).style('stroke', color).attr('stroke-width', 5).attr('stroke-linecap', 'round');
+    g.append('path').attr('d', 'M5,-10 L17,0 L5,10').style('fill', 'none').style('stroke', color).attr('stroke-width', 5)
+      .attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round');
+  });
+
+  dash.draw('spark', (el) => {
+    const d = dash.data('diario');
+    el.replaceChildren();
+    if (d.status !== 'ok' || !d.data.length) return;
+    const f = d.data.slice(-90).map((r) => ({ t: FB.parse(r.fecha), v: r.fitness })).filter((r) => r.t && r.v != null);
+    const W = el.clientWidth || 240, H = 56;
+    const x = d3.scaleUtc().domain(d3.extent(f, (r) => r.t)).range([2, W - 6]);
+    const y = d3.scaleLinear().domain([0, d3.max(f, (r) => r.v) * 1.15]).range([H - 2, 4]);
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+      .attr('role', 'img').attr('aria-label', 'Fitness de los últimos 90 días');
+    svg.append('path').datum(f).style('fill', dash.colors[0]).style('opacity', 0.14)
+      .attr('d', d3.area().x((r) => x(r.t)).y0(H - 2).y1((r) => y(r.v)));
+    svg.append('path').datum(f).style('fill', 'none').style('stroke', dash.colors[0]).attr('stroke-width', 2)
+      .attr('d', d3.line().x((r) => x(r.t)).y((r) => y(r.v)));
+    const u = f[f.length - 1];
+    svg.append('circle').attr('cx', x(u.t)).attr('cy', y(u.v)).attr('r', 3.5).style('fill', dash.colors[0]);
+  });
+
+  dash.draw('gauge', (el) => {
+    const r = FB.fila('resumen');
+    el.replaceChildren();
+    if (!r || r.forma == null) return;
+    const W = el.clientWidth || 240, H = 58, lo = -40, hi = 30;
+    const x = d3.scaleLinear().domain([lo, hi]).range([4, W - 4]).clamp(true);
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+      .attr('role', 'img').attr('aria-label', 'Forma ' + FB.s1(r.forma) + ' en una escala de muy cargado a fresco');
+    const tramos = [[lo, -25, 'var(--color-bad)', 'Muy cargado'], [-25, -10, 'var(--color-warn)', 'Cargado'],
+      [-10, 10, 'var(--cds-chart-muted)', 'Equilibrado'], [10, hi, 'var(--color-ok)', 'Fresco']];
+    tramos.forEach(([a, b, c]) => {
+      svg.append('rect').attr('x', x(a) + 1).attr('width', Math.max(0, x(b) - x(a) - 2)).attr('y', 22).attr('height', 10).attr('rx', 3)
+        .style('fill', c).style('opacity', 0.55);
+    });
+    [-25, -10, 10].forEach((v) => svg.append('text').attr('class', 'fb-mini-label').attr('x', x(v)).attr('y', 46).attr('text-anchor', 'middle').text(FB.n0(v)));
+    const px = x(r.forma);
+    svg.append('path').attr('d', `M${px - 7},6 L${px + 7},6 L${px},18 Z`).style('fill', 'var(--color-fg)');
+    svg.append('line').attr('x1', px).attr('x2', px).attr('y1', 18).attr('y2', 34).style('stroke', 'var(--color-fg)').attr('stroke-width', 2);
+  });
+
+  dash.draw('ftpbars', (el) => {
+    const r = FB.fila('resumen');
+    el.replaceChildren();
+    if (!r || !r.eftp) return;
+    const filas = [['Estimado', r.eftp, dash.colors[0]], ['En tu perfil', r.ftp_perfil, 'var(--cds-chart-muted)']].filter((f) => f[1]);
+    const W = el.clientWidth || 240, H = filas.length * 24 + 4;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+      .attr('role', 'img').attr('aria-label', 'FTP estimado frente al FTP de tu perfil');
+    const izq = Math.ceil(FB.ancho(svg, filas.map((f) => f[0]))) + 8, der = 44;
+    const x = d3.scaleLinear().domain([0, d3.max(filas, (f) => f[1]) * 1.02]).range([izq, W - der]);
+    filas.forEach(([n, v, c], i) => {
+      const y = 4 + i * 24;
+      svg.append('text').attr('class', 'fb-mini-label').attr('x', 0).attr('y', y + 11).text(n);
+      svg.append('rect').attr('x', izq).attr('y', y + 2).attr('height', 12).attr('rx', 3).attr('width', Math.max(0, x(v) - izq)).style('fill', c);
+      svg.append('text').attr('class', 'fb-mini-label').attr('x', x(v) + 6).attr('y', y + 12).text(FB.n0(v) + ' W');
+    });
+  });
+
+  dash.draw('minisem', (el) => {
+    const d = dash.data('semanas');
+    el.replaceChildren();
+    if (d.status !== 'ok' || !d.data.length) return;
+    const f = d.data.slice(-8);
+    const W = el.clientWidth || 240, H = 62;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+      .attr('role', 'img').attr('aria-label', 'Horas por semana en las últimas 8 semanas');
+    const x = d3.scaleBand().domain(f.map((r) => r.semana)).range([0, W]).padding(0.25);
+    const y = d3.scaleLinear().domain([0, (d3.max(f, (r) => r.horas) || 1) * 1.1]).range([H - 16, 12]);
+    f.forEach((r, i) => {
+      const ult = i === f.length - 1;
+      svg.append('rect').attr('x', x(r.semana)).attr('width', x.bandwidth()).attr('y', y(r.horas)).attr('height', Math.max(1, y(0) - y(r.horas)))
+        .attr('rx', 2).style('fill', ult ? dash.colors[1] : dash.colors[0]).style('opacity', ult ? 1 : 0.75);
+      svg.append('text').attr('class', 'fb-mini-label').attr('x', x(r.semana) + x.bandwidth() / 2).attr('y', y(r.horas) - 3)
+        .attr('text-anchor', 'middle').text(FB.n1(r.horas));
+    });
+    svg.append('text').attr('class', 'fb-mini-label').attr('x', 0).attr('y', H - 2).text('hace 8 semanas');
+    svg.append('text').attr('class', 'fb-mini-label').attr('x', W).attr('y', H - 2).attr('text-anchor', 'end').text('esta semana (h)');
+  });
+</script>
+
+<script>
+  // Detalle de un entreno
+  const ZONAS = [['Z1', 'Recuperación'], ['Z2', 'Resistencia'], ['Z3', 'Tempo'], ['Z4', 'Umbral'], ['Z5', 'VO2máx'], ['Z6', 'Anaeróbico'], ['Z7', 'Sprint']];
+  FB.sel = null;
+  FB.entreno = () => {
+    const d = dash.data('actividades');
+    if (d.status !== 'ok' || !d.data.length) return null;
+    return d.data.find((r) => r.id === FB.sel) || d.data[0];
+  };
+  FB.zonaDe = (w, a) => {
+    const pct = String(a.zonas_pct || '55,75,90,105,120,150,999').split(',').map(Number);
+    const p = a.ftp ? (w / a.ftp) * 100 : 0;
+    const i = pct.findIndex((z) => p <= z);
+    return i < 0 ? 6 : i;
+  };
+  FB.verEntreno = (id, bajar) => {
+    FB.sel = id;
+    ['selent', 'dethead', 'detpot', 'detzonas', 'detint', 'tabla'].forEach((n) => dash.draw(n));
+    if (bajar) document.querySelectorAll('#detalle').forEach((s) => s.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+  const marca = (n, campo, id) => { n.setAttribute('data-source', 'actividades'); n.setAttribute('data-field', campo); n.setAttribute('data-where', 'id=' + encodeURIComponent(id)); };
+
+  dash.draw('selent', (sel) => {
+    const d = dash.data('actividades');
+    if (d.status !== 'ok') { sel.replaceChildren(); return; }
+    sel.replaceChildren(...d.data.slice(0, 30).map((r) => new Option(FB.dia(r.fecha) + ' · ' + FB.n0(r.minutos) + ' min · ' + FB.n0(r.tss) + ' TSS', r.id)));
+    const a = FB.entreno();
+    if (a) sel.value = a.id;
+    sel.onchange = () => FB.verEntreno(sel.value, false);
+  });
+
+  dash.draw('dethead', (el) => {
+    const a = FB.entreno();
+    el.replaceChildren();
+    if (!a) return;
+    const h = document.createElement('h3'); h.textContent = a.nombre + ' · ' + FB.dia(a.fecha); el.append(h);
+    const g = document.createElement('div'); g.className = 'fb-stats';
+    const stats = [['minutos', 'Minutos', FB.n0], ['tss', 'TSS', FB.n0], ['vatios', 'W media', FB.n0], ['np', 'W normalizada', FB.n0],
+      ['intensidad', 'Intensidad (IF)', FB.n2], ['kj', 'kJ', FB.n0], ['cadencia', 'Cadencia (rpm)', FB.n0]];
+    if (a.fc) stats.push(['fc', 'FC media', FB.n0]);
+    stats.forEach(([k, et, f]) => {
+      const c = document.createElement('div'); c.className = 'fb-stat';
+      const b = document.createElement('b'); b.textContent = f(a[k]); marca(b, k, a.id);
+      const s = document.createElement('span'); s.textContent = et;
+      c.append(b, s); g.append(c);
+    });
+    el.append(g);
+  });
+
+  dash.draw('detpot', (el) => {
+    const det = dash.data('detalle'), a = FB.entreno();
+    el.replaceChildren();
+    if (det.status === 'error' || det.status === 'missing') {
+      const m = document.createElement('div'); m.className = 'fb-msg'; m.textContent = 'No se ha podido cargar el detalle.'; el.append(m); return;
+    }
+    if (det.status !== 'ok' || !a) return;
+    const f = det.data.filter((r) => r.id === a.id && r.vatios != null);
+    if (!f.length) {
+      const m = document.createElement('div'); m.className = 'fb-msg';
+      m.textContent = 'Este entreno no tiene detalle guardado. Solo se guardan los 30 más recientes.'; el.append(m); return;
+    }
+    const W = el.clientWidth || 640, H = Math.round(Math.max(240, Math.min(340, W * 0.42)));
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+      .attr('role', 'img').attr('aria-label', 'Potencia y cadencia a lo largo del entreno, coloreada por zonas');
+    const maxW = Math.max(d3.max(f, (r) => r.vatios), (a.ftp || 0) * 1.1);
+    const y = d3.scaleLinear().domain([0, maxW * 1.05]).nice();
+    const yc = d3.scaleLinear().domain([0, Math.max(120, d3.max(f, (r) => r.cadencia || 0))]);
+    const m = { l: Math.ceil(FB.ancho(svg, y.ticks(4).map((v) => FB.n0(v) + ' W'))) + 10, r: 34, t: 10, b: 26 };
+    y.range([H - m.b, m.t]); yc.range([H - m.b, m.t]);
+    const fin = d3.max(f, (r) => r.seg) + 10;
+    const x = d3.scaleLinear().domain([0, fin / 60]).range([m.l, W - m.r]);
+    svg.append('g').attr('transform', `translate(0,${H - m.b})`)
+      .call(d3.axisBottom(x).ticks(Math.max(3, Math.floor((W - m.l - m.r) / 70))).tickFormat((v) => FB.n0(v) + ' min').tickSizeOuter(0));
+    svg.append('g').attr('transform', `translate(${m.l},0)`)
+      .call(d3.axisLeft(y).ticks(4).tickFormat((v) => FB.n0(v) + ' W').tickSize(-(W - m.l - m.r))).call((g) => g.select('.domain').remove());
+    svg.append('g').attr('transform', `translate(${W - m.r},0)`)
+      .call(d3.axisRight(yc).ticks(3).tickFormat(FB.n0).tickSize(0)).call((g) => g.select('.domain').remove());
+    const bw = Math.max(1, x(10 / 60) - x(0) + 0.4);
+    svg.append('g').selectAll('rect').data(f).join('rect')
+      .attr('x', (r) => x(r.seg / 60)).attr('width', bw).attr('y', (r) => y(r.vatios)).attr('height', (r) => Math.max(0, y(0) - y(r.vatios)))
+      .style('fill', (r) => `var(--fb-z${FB.zonaDe(r.vatios, a) + 1})`);
+    svg.append('path').datum(f.filter((r) => r.cadencia != null)).style('fill', 'none').style('stroke', 'var(--color-fg)').style('opacity', 0.45)
+      .attr('stroke-width', 1.2).attr('d', d3.line().x((r) => x(r.seg / 60 + 5 / 60)).y((r) => yc(r.cadencia)));
+    if (a.ftp) {
+      svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(a.ftp)).attr('y2', y(a.ftp))
+        .style('stroke', 'var(--color-fg)').attr('stroke-dasharray', '5,4').style('opacity', 0.7);
+      svg.append('text').attr('class', 'fb-axis-label').attr('x', m.l + 6).attr('y', y(a.ftp) - 5).text('FTP ' + FB.n0(a.ftp) + ' W');
+    }
+    svg.append('text').attr('class', 'fb-axis-label').attr('x', W - m.r + 4).attr('y', m.t - 2).text('rpm');
+    const guia = svg.append('line').attr('y1', m.t).attr('y2', H - m.b).style('stroke', 'var(--cds-chart-reference)').attr('visibility', 'hidden');
+    const tip = FB.tip(el);
+    const bis = d3.bisector((r) => r.seg / 60).center;
+    svg.append('rect').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b)
+      .style('fill', 'transparent').style('touch-action', 'pan-y')
+      .on('pointermove', (ev) => {
+        const r = f[bis(f, x.invert(d3.pointer(ev)[0]))];
+        if (!r) return;
+        guia.attr('x1', x(r.seg / 60)).attr('x2', x(r.seg / 60)).attr('visibility', 'visible');
+        const z = FB.zonaDe(r.vatios, a);
+        tip.replaceChildren();
+        const hh = document.createElement('div'); hh.className = 'fb-tip-h';
+        hh.textContent = 'Minuto ' + Math.floor(r.seg / 60) + ':' + String(r.seg % 60).padStart(2, '0'); tip.append(hh);
+        FB.linea(tip, 'Potencia', FB.n0(r.vatios) + ' W'); FB.linea(tip, 'Zona', ZONAS[z][0] + ' ' + ZONAS[z][1]);
+        FB.linea(tip, 'Cadencia', FB.n0(r.cadencia) + ' rpm');
+        tip.hidden = false;
+        const box = el.getBoundingClientRect();
+        FB.ponerTip(el, tip, (x(r.seg / 60) / W) * box.width, (y(r.vatios) / H) * box.height);
+      })
+      .on('pointerleave', () => { tip.hidden = true; guia.attr('visibility', 'hidden'); });
+  });
+
+  dash.draw('detzonas', (el) => {
+    const a = FB.entreno();
+    el.replaceChildren();
+    if (!a) return;
+    const tot = ZONAS.reduce((s, z, i) => s + (a['z' + (i + 1) + '_min'] || 0), 0);
+    if (!tot) { const m = document.createElement('div'); m.className = 'fb-msg'; m.textContent = 'Sin datos de zonas para este entreno.'; el.append(m); return; }
+    ZONAS.forEach(([cod, nom], i) => {
+      const v = a['z' + (i + 1) + '_min'] || 0;
+      const row = document.createElement('div'); row.className = 'fb-zona';
+      const n = document.createElement('span'); n.className = 'nom';
+      const b = document.createElement('b'); b.textContent = cod; n.append(b, ' ' + nom);
+      const bar = document.createElement('span'); bar.className = 'bar';
+      const fill = document.createElement('i'); fill.style.width = (100 * v / tot).toFixed(1) + '%'; fill.style.background = `var(--fb-z${i + 1})`; bar.append(fill);
+      const val = document.createElement('span'); val.className = 'val'; val.textContent = FB.n1(v) + ' min'; marca(val, 'z' + (i + 1) + '_min', a.id);
+      row.append(n, bar, val); el.append(row);
+    });
+  });
+
+  dash.draw('detint', (el) => {
+    const a = FB.entreno();
+    el.replaceChildren();
+    if (!a) return;
+    const lista = String(a.intervalos || '').split(' | ').filter(Boolean);
+    if (!lista.length) { const m = document.createElement('div'); m.className = 'fb-msg'; m.textContent = 'intervals.icu no ha detectado esfuerzos en este entreno.'; el.append(m); return; }
+    lista.forEach((t) => {
+      const c = document.createElement('span'); c.className = 'fb-chip';
+      const w = +(t.match(/(\d+)w/) || [])[1];
+      if (w) { const dot = document.createElement('i'); dot.style.background = `var(--fb-z${FB.zonaDe(w, a) + 1})`; c.append(dot); }
+      c.append(t.replace(/(\d+)w$/, '$1 W'));
+      el.append(c);
+    });
+  });
+</script>
+
+<script>
+  // Tabla de entrenos: cada fila abre su detalle
+  dash.draw('tabla', (tb) => {
+    const d = dash.data('actividades');
+    tb.replaceChildren();
+    if (d.status !== 'ok') return;
+    const sel = FB.entreno();
+    d.data.slice(0, 15).forEach((r) => {
+      const tr = document.createElement('tr'); tr.setAttribute('data-key', encodeURIComponent(r.id));
+      tr.tabIndex = 0;
+      if (sel && sel.id === r.id) tr.className = 'is-sel';
+      const celdas = [[FB.dia(r.fecha), ''], [r.nombre, 'fb-name'], [FB.n0(r.minutos), 'n'], [FB.n0(r.tss), 'n'],
+        [FB.n0(r.vatios), 'n'], [FB.n0(r.np), 'n'], [FB.n2(r.intensidad), 'n'], ['Ver ›', 'go']];
+      celdas.forEach(([v, c]) => { const td = document.createElement('td'); td.textContent = v; if (c) td.className = c; tr.append(td); });
+      tr.onclick = () => FB.verEntreno(r.id, true);
+      tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); FB.verEntreno(r.id, true); } };
+      tb.append(tr);
+    });
+  });
+</script>
+<p class="gh-pie">Datos de intervals.icu (entrenos de MyWhoosh). Se actualiza cada día.</p>
+</div>
+<script>dash._start();</script>
+</body>
+</html>

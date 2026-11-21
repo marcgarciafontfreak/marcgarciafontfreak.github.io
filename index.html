@@ -72,6 +72,9 @@
     { icono: "📈", nombre: "Agente financiero", url: "agente-financiero/",
       desc: "Informe diario automático con precios, noticias y análisis de mi cartera, enviado por correo.",
       etiqueta: "Finanzas" },
+    { icono: "🚴", nombre: "Forma en bici", url: "bici/",
+      desc: "Mis entrenos de MyWhoosh: fase de forma, curva de potencia, detalle de cada sesión y consejos.",
+      etiqueta: "Deporte" },
   ];
 
   const grid = document.getElementById("tools");
@@ -79,6 +82,7 @@
     const a = document.createElement("a");
     a.className = "tool";
     a.href = t.url;
+    if (t.url.startsWith("http")) { a.target = "_blank"; a.rel = "noopener"; }
     a.innerHTML = `
       <div class="icon">${t.icono}</div>
       <h2></h2>
