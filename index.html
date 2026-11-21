@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Mis herramientas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f6f3ee; --card: #fffdf9; --ink: #1d1b18; --muted: #6b655c;
+    --line: #e4ddd2; --accent: #c2410c; --accent-soft: #fde8dc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161513; --card: #1f1d1a; --ink: #f1ece4; --muted: #a39b8f;
+      --line: #33302b; --accent: #fb923c; --accent-soft: #3a2417;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Bricolage Grotesque", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 56px 16px 40px; }
+  header { margin-bottom: 40px; }
+  .kicker {
+    font-family: "IBM Plex Mono", monospace; font-size: 13px;
+    color: var(--accent); letter-spacing: .08em; text-transform: uppercase;
+  }
+  h1 { font-size: clamp(36px, 7vw, 56px); font-weight: 800; line-height: 1; margin: 10px 0 14px; letter-spacing: -.02em; }
+  header p { color: var(--muted); font-size: 18px; margin: 0; max-width: 520px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+  a.tool {
+    display: flex; flex-direction: column; gap: 10px; text-decoration: none; color: inherit;
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px;
+    transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  a.tool:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: 0 8px 24px -12px rgba(0,0,0,.25); }
+  .icon {
+    width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+    background: var(--accent-soft); font-size: 22px;
+  }
+  .tool h2 { font-size: 21px; font-weight: 700; margin: 4px 0 0; }
+  .tool p { color: var(--muted); margin: 0; font-size: 15px; line-height: 1.45; flex: 1; }
+  .meta { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+  .meta .go { color: var(--accent); }
+  footer { margin-top: 48px; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="kicker">Proyectos personales</div>
+    <h1>Mis herramientas</h1>
+    <p>Pequeñas utilidades que voy construyendo con Claude Code.</p>
+  </header>
+
+  <div class="grid" id="tools"></div>
+
+  <footer>Uso personal · no indexado</footer>
+</main>
+
+<script>
+  // Para añadir una herramienta nueva, añade una línea a esta lista.
+  const TOOLS = [
+    { icono: "🍳", nombre: "Recetario", url: "recetario/",
+      desc: "Más de 700 recetas sacadas de mis guardados de Instagram, con buscador y filtros por categoría.",
+      etiqueta: "Cocina" },
+    { icono: "📈", nombre: "Agente financiero", url: "agente-financiero/",
+      desc: "Informe diario automático con precios, noticias y análisis de mi cartera, enviado por correo.",
+      etiqueta: "Finanzas" },
+  ];
+
+  const grid = document.getElementById("tools");
+  for (const t of TOOLS) {
+    const a = document.createElement("a");
+    a.className = "tool";
+    a.href = t.url;
+    a.innerHTML = `
+      <div class="icon">${t.icono}</div>
+      <h2></h2>
+      <p></p>
+      <div class="meta"><span></span><span class="go">Abrir →</span></div>`;
+    a.querySelector("h2").textContent = t.nombre;
+    a.querySelector("p").textContent = t.desc;
+    a.querySelector(".meta span").textContent = t.etiqueta;
+    grid.appendChild(a);
+  }
+</script>
+</body>
+</html>
